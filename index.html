@@ -45,6 +45,8 @@
 <canvas id="c"></canvas>
 
 <div id="hud">
+  <button class="pill" id="bInst">Instrument <b>Strings</b></button>
+  <button class="pill hide" id="bSnap">Pitch <b>Free</b></button>
   <button class="pill" id="bScale">Scale <b>Pentatonic</b></button>
   <button class="pill" id="bKey">Key <b>E</b></button>
   <button class="pill hide" id="bTool">Touch <b>Draw</b></button>
@@ -65,11 +67,13 @@
       <li><span class="g">Pluck</span><span>Swipe a fingertip across a string.</span></li>
       <li><span class="g">Flick</span><span>Flick fast along a string to send sparks down it.</span></li>
       <li><span class="g">Clear</span><span>Make a fist and hold it for a second.</span></li>
+      <li><span class="g">Theremin</span><span>Switch instrument at the top. Move your right index finger toward the antenna for higher notes. Raise your left hand for volume, or pinch it for silence.</span></li>
     </ul>
     <ul class="guide hide" id="guideTouch">
       <li><span class="g">Draw</span><span>Drag to stretch a string. Shorter is higher.</span></li>
       <li><span class="g">Pluck</span><span>Swipe across strings (mouse: just move over them; touch: switch to Play).</span></li>
       <li><span class="g">Flick</span><span>Swipe fast along a string to send sparks.</span></li>
+      <li><span class="g">Theremin</span><span>Switch instrument at the top, then press and slide. Left to right is pitch, and up and down is volume.</span></li>
     </ul>
     <button class="btn" id="bStart">Start with camera</button>
     <button class="link" id="bTouch">Play with touch or mouse instead</button>
@@ -198,6 +202,7 @@ let drawing = null;           // {src, a, b, tension, lastIdx, hist}
 let mode = 'intro';           // intro | camera | pointer
 let camOn = true, landmarker = null;
 let touchTool = 'draw';
+let instrument = 'strings';     // strings | theremin
 const COARSE = matchMedia('(pointer: coarse)').matches;
 
 const sA = s => ({x: s.ax * W, y: s.ay * H});
@@ -372,7 +377,7 @@ function onHands(res, now){
       }
       const vx = (p.x - f.x) / dt, vy = (p.y - f.y) / dt;
       f.vx = f.vx * 0.35 + vx * 0.65; f.vy = f.vy * 0.35 + vy * 0.65;
-      fingerStep(fid, {x:f.x, y:f.y}, {x:p.x, y:p.y}, f.vx, f.vy, now, h.fist);
+      fingerStep(fid, {x:f.x, y:f.y}, {x:p.x, y:p.y}, f.vx, f.vy, now, h.fist || instrument !== 'strings');
       f.x = p.x; f.y = p.y;
     }
     h.prevT = now;
@@ -384,7 +389,7 @@ function onHands(res, now){
 
   // Pull a thread taut with two pinches
   const pres = presentHands().sort((p, q) => p.pts[0].x - q.pts[0].x);
-  if (pres.length >= 2 && pres[0].pinched && pres[1].pinched){
+  if (instrument === 'strings' && pres.length >= 2 && pres[0].pinched && pres[1].pinched){
     const a = {...pres[0].pinchPt}, b = {...pres[1].pinchPt};
     if (!drawing || drawing.src !== 'hands') drawing = {src:'hands', a, b, tension:0, lastIdx:-1, hist:[]};
     else { drawing.a = a; drawing.b = b; }
@@ -397,7 +402,7 @@ function onHands(res, now){
   // Hold a fist to clear
   const fdt = lastDetect ? Math.min(0.1, (now - lastDetect) / 1000) : 0;
   const fister = pres.find(h => h.fist);
-  if (fister && !drawing && strings.some(s => !s.dying)){
+  if (instrument === 'strings' && fister && !drawing && strings.some(s => !s.dying)){
     if (fistT >= 0){ fistT += fdt; if (fistT > 1.0){ clearAll(now); fistT = -1; } }
   } else if (!fister) fistT = 0;
   lastDetect = now;
@@ -411,6 +416,7 @@ canvas.addEventListener('pointerdown', e => {
   Audio.init();
   canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
   const p = {x:e.clientX, y:e.clientY}, now = performance.now();
+  if (instrument === 'theremin'){ thPtr = {id:e.pointerId, x:p.x, y:p.y}; return; }
   const drawMode = e.pointerType === 'mouse' || touchTool === 'draw';
   ptrs.set(e.pointerId, {x:p.x, y:p.y, t:now, vx:0, vy:0, draw:drawMode});
   forgetFinger('p' + e.pointerId); fingerStep('p' + e.pointerId, p, p, 0, 0, now, true);
@@ -419,6 +425,7 @@ canvas.addEventListener('pointerdown', e => {
 canvas.addEventListener('pointermove', e => {
   if (mode === 'intro') return;
   const now = performance.now(), p = {x:e.clientX, y:e.clientY}, fid = 'p' + e.pointerId;
+  if (instrument === 'theremin'){ if (thPtr && thPtr.id === e.pointerId){ thPtr.x = p.x; thPtr.y = p.y; } return; }
   let st = ptrs.get(e.pointerId);
   if (!st){
     if (e.pointerType !== 'mouse') return;          // mouse hover plucks
@@ -432,6 +439,7 @@ canvas.addEventListener('pointermove', e => {
   st.x = p.x; st.y = p.y; st.t = now;
 });
 function ptrEnd(e){
+  if (thPtr && thPtr.id === e.pointerId) thPtr = null;
   const fid = 'p' + e.pointerId, now = performance.now();
   if (drawing && drawing.src === fid){ createString(drawing.a, drawing.b, now); drawing = null; }
   if (e.pointerType === 'mouse' && e.type === 'pointerup'){
@@ -444,7 +452,7 @@ canvas.addEventListener('pointercancel', ptrEnd);
 canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse'){ ptrs.delete(e.pointerId); forgetFinger('p' + e.pointerId); } });
 
 // ================= Rendering =================
-const PTS = new Float32Array(2 * 49);
+const PTS = new Float32Array(2 * 130);
 function strokePts(n, width, style){
   ctx.lineWidth = width; ctx.strokeStyle = style; ctx.beginPath();
   ctx.moveTo(PTS[0], PTS[1]);
@@ -601,10 +609,171 @@ function drawBackground(){
   }
 }
 
+
+// ================= Theremin =================
+// Right index finger = pitch (closer to the antenna is higher, continuous glide).
+// Left hand height = volume (like lifting off the loop antenna); left pinch = silence.
+let thPtr = null, thSnap = false;
+const TH_SPAN = 36;                                   // three octaves
+const th = {midi:0, vol:0, steady:0, lastMidi:0, pitchPt:null, volHand:null, volPt:null, muted:false, active:false};
+const Theremin = {
+  osc:null,
+  start(){
+    const ctx = Audio.ctx; if (!ctx || this.osc) return;
+    const osc = ctx.createOscillator();
+    // Near-sine with a few weak harmonics, close to the classic heterodyne tone
+    const imag = new Float32Array([0, 1, 0.3, 0.13, 0.06, 0.03, 0.012]);
+    osc.setPeriodicWave(ctx.createPeriodicWave(new Float32Array(imag.length), imag));
+    osc.frequency.value = 220;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 5.6;
+    const vib = ctx.createGain(); vib.gain.value = 0;
+    lfo.connect(vib); vib.connect(osc.detune);
+    const filt = ctx.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 2500; filt.Q.value = 0.6;
+    const gain = ctx.createGain(); gain.gain.value = 0;
+    const send = ctx.createGain(); send.gain.value = 0.55;
+    osc.connect(filt); filt.connect(gain); gain.connect(Audio.master); gain.connect(send); send.connect(Audio.send);
+    osc.start(); lfo.start();
+    Object.assign(this, {osc, lfo, vib, filt, gain});
+  },
+  set(freq, vol, vibCents){
+    if (!this.osc) return;
+    const t = Audio.ctx.currentTime;
+    this.osc.frequency.setTargetAtTime(freq, t, thSnap ? 0.045 : 0.022);
+    this.gain.gain.setTargetAtTime(vol * 0.5, t, vol < 0.01 ? 0.015 : 0.035);
+    this.vib.gain.setTargetAtTime(vibCents, t, 0.18);
+    this.filt.frequency.setTargetAtTime(clamp(freq * 6, 900, 7000), t, 0.05);
+  },
+  stop(){
+    if (!this.osc) return;
+    const {osc, lfo, gain} = this, t = Audio.ctx.currentTime;
+    gain.gain.setTargetAtTime(0, t, 0.05);
+    osc.stop(t + 0.4); lfo.stop(t + 0.4);
+    this.osc = null;
+  }
+};
+function thGeom(){
+  const ax = W - Math.max(30, W * 0.06);
+  return {ax, aTop:H * 0.14, aBot:H * 0.80, x0:W * 0.16, x1:ax - 26, loopX:W * 0.11, loopY:H * 0.92, loopR:Math.max(46, W * 0.085)};
+}
+const thBase = () => NOTES[0] + 12;
+function thNotes(){
+  const st = SCALES[scaleIdx].steps, b = thBase(), out = [];
+  for (let o = 0; o < 3; o++) for (const s of st) out.push(b + o * 12 + s);
+  out.push(b + 36); return out;
+}
+const thMidiAt = (x, g) => thBase() + clamp((x - g.x0) / (g.x1 - g.x0), 0, 1) * TH_SPAN;
+const thXOf = (m, g) => g.x0 + (m - thBase()) / TH_SPAN * (g.x1 - g.x0);
+function thNearest(m){ let best = 0, bd = 1e9; for (const n of thNotes()){ const d = Math.abs(n - m); if (d < bd){ bd = d; best = n; } } return best; }
+
+function updateTheremin(now, dt){
+  const g = thGeom();
+  let pitchPt = null, volume = 0, volHand = null, volPt = null, muted = false;
+  const overlayOpen = !$('#overlay').classList.contains('gone');
+  if (thPtr){
+    pitchPt = {x:thPtr.x, y:thPtr.y};
+    volume = clamp((H * 0.92 - thPtr.y) / (H * 0.75), 0.08, 1);
+  } else if (mode === 'camera'){
+    const pres = presentHands().sort((p, q) => p.pts[0].x - q.pts[0].x);
+    if (pres.length >= 2){
+      const ph = pres[pres.length - 1]; volHand = pres[0];
+      pitchPt = ph.pts[8]; volPt = volHand.pts[9];
+      volume = clamp((g.loopY - volPt.y) / (g.loopY - H * 0.2), 0, 1);
+      muted = volHand.pinched;
+    } else if (pres.length === 1){
+      pitchPt = pres[0].pts[8]; volume = 0.55; muted = pres[0].pinched;
+    }
+  }
+  let midi = th.midi, target = 0;
+  if (pitchPt && !overlayOpen){
+    midi = thMidiAt(pitchPt.x, g);
+    if (thSnap){ const n = thNearest(midi); midi = n + (midi - n) * 0.18; }
+    target = muted ? 0 : Math.pow(volume, 1.4);
+  }
+  // delayed vibrato when a note is held steady
+  const moveRate = Math.abs(midi - th.lastMidi) / Math.max(dt, 1e-3);
+  th.steady = moveRate < 2.5 ? th.steady + dt : 0;
+  th.lastMidi = midi;
+  const vibCents = clamp((th.steady - 0.35) / 0.7, 0, 1) * 16;
+  th.midi = midi; th.vol += (target - th.vol) * Math.min(1, dt * 14);
+  Object.assign(th, {pitchPt, volHand, volPt, muted, active:!!pitchPt});
+  Theremin.set(midiFreq(midi), target, vibCents);
+}
+
+function drawTheremin(now, dt){
+  const g = thGeom(), t = now / 1000, base = thBase();
+  const h = hueFor(Math.round(th.midi)), v = th.vol;
+  // note ladder
+  const near = thNearest(th.midi);
+  ctx.font = '500 11px ui-sans-serif,system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (const n of thNotes()){
+    const x = thXOf(n, g), isRoot = (n - base) % 12 === 0;
+    const hi = th.active ? Math.max(0, 1 - Math.abs(th.midi - n) / 1.2) : 0;
+    const a = (isRoot ? 0.13 : 0.06) + hi * 0.35 * (0.4 + v);
+    ctx.strokeStyle = `hsla(${hueFor(n)},90%,70%,${a})`; ctx.lineWidth = 1 + hi * 1.5;
+    ctx.beginPath(); ctx.moveTo(x, H * 0.12); ctx.lineTo(x, H * 0.82); ctx.stroke();
+    ctx.fillStyle = `hsla(${hueFor(n)},90%,80%,${0.22 + hi * 0.7})`;
+    if (isRoot || hi > 0.2 || n === near) ctx.fillText(midiName(n), x, H * 0.83);
+  }
+  // pitch antenna
+  const aglow = 0.35 + 0.65 * v;
+  for (const [w, al, l] of [[18, 0.06, 60], [7, 0.2, 65], [2.4, 0.9, 85]]){
+    ctx.strokeStyle = `hsla(${h},100%,${l}%,${al * aglow})`; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(g.ax, g.aTop); ctx.lineTo(g.ax, g.aBot); ctx.stroke();
+  }
+  node(g.ax, g.aTop, h, aglow);
+  // volume loop antenna
+  const vh = 200;
+  for (const [w, al, l] of [[14, 0.06, 60], [5, 0.2, 65], [2, 0.8, 85]]){
+    ctx.strokeStyle = `hsla(${vh},90%,${l}%,${al * (0.4 + 0.6 * v)})`; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.ellipse(g.loopX, g.loopY, g.loopR, g.loopR * 0.22, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  // left hand volume link
+  if (th.volPt){
+    const p = th.volPt, col = th.muted ? '0,0%' : `${vh},90%`;
+    ctx.strokeStyle = `hsla(${col},75%,${0.12 + 0.3 * v})`; ctx.lineWidth = 1.2; ctx.setLineDash([3, 6]);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(clamp(p.x, g.loopX - g.loopR, g.loopX + g.loopR), g.loopY); ctx.stroke(); ctx.setLineDash([]);
+    const r = 26;
+    ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.stroke();
+    ctx.strokeStyle = th.muted ? 'rgba(255,170,160,.8)' : `hsla(${vh},100%,78%,.9)`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.001, th.muted ? 1 : v)); ctx.stroke();
+  }
+  // sound wave from fingertip to the antenna
+  if (th.active && th.pitchPt){
+    const p = th.pitchPt, ey = clamp(p.y, g.aTop, g.aBot);
+    const dx = g.ax - p.x, dy = ey - p.y, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+    const cycles = Math.min(2 + (th.midi - base) / TH_SPAN * 16, L / 14), amp = 3 + v * 26, N = 120;
+    const ph = t * (3 + (th.midi - base) * 0.25);
+    for (let k = 0; k <= N; k++){
+      const u = k / N, env = Math.sin(Math.PI * u);
+      const d = Math.sin(u * cycles * Math.PI * 2 - ph * Math.PI * 2) * amp * env;
+      PTS[2 * k] = p.x + dx * u + nx * d; PTS[2 * k + 1] = p.y + dy * u + ny * d;
+    }
+    if (v > 0.01) glow(N, h, 0.25 + 0.75 * v, 0.4 + v);
+    ctx.fillStyle = `hsla(${h},100%,80%,${0.5 + 0.5 * v})`; ctx.beginPath(); ctx.arc(p.x, p.y, 4 + v * 3, 0, 7); ctx.fill();
+    if (v > 0.05 && Math.random() < v) spawn(p.x, p.y, (Math.random() - 0.5) * 60, -30 - Math.random() * 60, h, 0.9, 1.4);
+    // note label
+    const nn = Math.round(th.midi), cents = Math.round((th.midi - nn) * 100);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.font = '500 16px ui-sans-serif,system-ui,sans-serif'; ctx.fillStyle = `hsla(${h},100%,88%,.95)`;
+    ctx.fillText(midiName(nn), p.x, p.y - 18);
+    ctx.font = '11px ui-sans-serif,system-ui,sans-serif'; ctx.fillStyle = 'rgba(200,215,245,.55)';
+    ctx.fillText((cents >= 0 ? '+' : '') + cents + '¢', p.x, p.y - 36);
+  }
+}
+
 // ================= Hints =================
 let hintCur = null;
 function hintText(){
   if (mode === 'intro') return '';
+  if (instrument === 'theremin'){
+    if (mode === 'pointer' || !landmarker) return thPtr ? '' : 'Press and slide. Left to right is pitch, and up and down is volume';
+    const n = presentHands().length;
+    if (!n) return 'Raise your hands. Your right hand plays pitch and your left hand sets volume';
+    if (n === 1) return 'Bring in your left hand for volume. For now it plays at a steady level';
+    if (th.vol < 0.04 && !th.muted) return 'Raise your left hand to get louder';
+    if (th.muted) return 'Release the pinch to sound';
+    return '';
+  }
   if (mode === 'pointer'){
     if (drawing) return 'Stretch to tune · release to pin';
     if (!stats.made) return COARSE ? 'Drag to stretch a string of light' : 'Drag to stretch a string of light';
@@ -652,8 +821,8 @@ function loop(){
   ctx.globalCompositeOperation = 'source-over';
   drawBackground();
   ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  drawStrings(now, dt);
-  drawLiveThreads(now, dt);
+  if (instrument === 'theremin'){ updateTheremin(now, dt); drawTheremin(now, dt); }
+  else { drawStrings(now, dt); drawLiveThreads(now, dt); }
   drawSparks(dt);
   drawParticles(dt);
   ctx.globalCompositeOperation = 'source-over';
@@ -722,11 +891,11 @@ $('#bStart').addEventListener('click', startCamera);
 $('#bTouch').addEventListener('click', startPointer);
 $('#bScale').addEventListener('click', () => {
   scaleIdx = (scaleIdx + 1) % SCALES.length; rebuildNotes();
-  $('#bScale').innerHTML = 'Scale <b>' + SCALES[scaleIdx].name + '</b>'; strumAll(0.2, performance.now());
+  $('#bScale').innerHTML = 'Scale <b>' + SCALES[scaleIdx].name + '</b>'; if (instrument === 'strings') strumAll(0.2, performance.now());
 });
 $('#bKey').addEventListener('click', () => {
   keyIdx = (keyIdx + 1) % KEYS.length; rebuildNotes();
-  $('#bKey').innerHTML = 'Key <b>' + KEYS[keyIdx][0] + '</b>'; strumAll(0.2, performance.now());
+  $('#bKey').innerHTML = 'Key <b>' + KEYS[keyIdx][0] + '</b>'; if (instrument === 'strings') strumAll(0.2, performance.now());
 });
 $('#bTool').addEventListener('click', () => {
   touchTool = touchTool === 'draw' ? 'play' : 'draw';
@@ -734,6 +903,18 @@ $('#bTool').addEventListener('click', () => {
 });
 $('#bCam').addEventListener('click', () => { camOn = !camOn; $('#bCam').innerHTML = 'Camera <b>' + (camOn ? 'On' : 'Off') + '</b>'; });
 $('#bClear').addEventListener('click', () => clearAll(performance.now()));
+function setInstrument(name){
+  instrument = name; drawing = null; thPtr = null;
+  const thm = name === 'theremin';
+  $('#bInst').innerHTML = 'Instrument <b>' + (thm ? 'Theremin' : 'Strings') + '</b>';
+  $('#bSnap').classList.toggle('hide', !thm);
+  $('#bClear').classList.toggle('hide', thm);
+  $('#bTool').classList.toggle('hide', thm || !COARSE);
+  if (thm){ Audio.init(); Theremin.start(); }
+  else { Theremin.stop(); const now = performance.now(); strings.forEach(s => { s.lastPlayed = now; }); }
+}
+$('#bInst').addEventListener('click', () => setInstrument(instrument === 'strings' ? 'theremin' : 'strings'));
+$('#bSnap').addEventListener('click', () => { thSnap = !thSnap; $('#bSnap').innerHTML = 'Pitch <b>' + (thSnap ? 'Snap' : 'Free') + '</b>'; });
 $('#bHelp').addEventListener('click', () => {
   const ov = $('#overlay');
   if (ov.classList.contains('gone')){
