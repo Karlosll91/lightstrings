@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lightstrings</title>
+<style>
+  html,body{margin:0;height:100%;background:#04050d;overflow:hidden;color:#dfe8ff;
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    -webkit-user-select:none;user-select:none;touch-action:none;-webkit-tap-highlight-color:transparent}
+  canvas{position:fixed;inset:0;display:block}
+  video{position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none}
+  #hud{position:fixed;top:max(12px,env(safe-area-inset-top));left:0;right:0;display:flex;justify-content:center;
+    gap:8px;flex-wrap:wrap;z-index:5;padding:0 12px;opacity:0;transition:opacity .6s;pointer-events:none}
+  #hud.on{opacity:1;pointer-events:auto}
+  .pill{background:rgba(18,24,46,.55);border:1px solid rgba(140,170,255,.2);color:#b9c9ef;border-radius:999px;
+    padding:7px 13px;font-size:13px;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);cursor:pointer;font-family:inherit}
+  .pill b{font-weight:600;color:#fff}
+  .pill.hide{display:none}
+  #status{position:fixed;top:calc(max(12px,env(safe-area-inset-top)) + 44px);left:50%;transform:translateX(-50%);
+    font-size:13px;color:#9fb3e0;z-index:5;pointer-events:none;transition:opacity .4s;text-align:center;width:90%}
+  #hint{position:fixed;bottom:calc(env(safe-area-inset-bottom) + 24px);left:0;right:0;font-size:15px;letter-spacing:.02em;
+    color:rgba(220,232,255,.88);text-shadow:0 0 18px rgba(80,140,255,.7);transition:opacity .6s;text-align:center;
+    padding:0 20px;pointer-events:none;z-index:4}
+  #overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:10;padding:24px;
+    background:radial-gradient(ellipse at 50% 40%,rgba(28,36,84,.5),rgba(3,4,10,.93) 72%);transition:opacity .5s}
+  #overlay.gone{opacity:0;pointer-events:none}
+  .card{max-width:460px;text-align:center}
+  h1{font-weight:200;letter-spacing:.22em;font-size:clamp(26px,7.4vw,40px);margin:0 0 8px;text-transform:uppercase;padding-left:.22em;white-space:nowrap;
+    background:linear-gradient(90deg,#8fd3ff,#c9a6ff,#ffd59a);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{opacity:.7;margin:0 0 26px;font-size:15px;line-height:1.45}
+  ul.guide{list-style:none;padding:0;margin:0 0 28px;text-align:left;display:grid;gap:12px}
+  ul.guide li{display:flex;gap:14px;align-items:baseline;font-size:14.5px;line-height:1.4;color:#c8d4f0}
+  .g{flex:0 0 66px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8fd3ff}
+  .btn{appearance:none;border:0;border-radius:999px;padding:14px 28px;font-size:16px;font-weight:600;color:#061024;font-family:inherit;
+    background:linear-gradient(90deg,#8fd3ff,#c9a6ff);box-shadow:0 0 30px rgba(140,170,255,.45);cursor:pointer}
+  .link{display:block;margin:16px auto 0;background:none;border:0;color:#9fb3e0;font-size:14px;text-decoration:underline;cursor:pointer;font-family:inherit}
+  #err{color:#ffb4a8;font-size:13.5px;margin-top:14px;line-height:1.45}
+  .note{font-size:12px;opacity:.5;margin-top:20px;line-height:1.4}
+  .hide{display:none !important}
+</style>
+</head>
+<body>
+<video id="cam" playsinline muted autoplay></video>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <button class="pill" id="bScale">Scale <b>Pentatonic</b></button>
+  <button class="pill" id="bKey">Key <b>E</b></button>
+  <button class="pill hide" id="bTool">Touch <b>Draw</b></button>
+  <button class="pill hide" id="bCam">Camera <b>On</b></button>
+  <button class="pill" id="bClear">Clear</button>
+  <button class="pill" id="bHelp">?</button>
+</div>
+<div id="status"></div>
+<div id="hint"></div>
+
+<div id="overlay">
+  <div class="card">
+    <h1>Lightstrings</h1>
+    <p class="sub">Stretch threads of light between your fingertips and play the air.</p>
+    <ul class="guide" id="guideHands">
+      <li><span class="g">Stretch</span><span>Raise both hands. Faint threads join your fingertips.</span></li>
+      <li><span class="g">Pull</span><span>Pinch thumb and index on both hands to pull a thread taut. Shorter is higher. Release to pin it.</span></li>
+      <li><span class="g">Pluck</span><span>Swipe a fingertip across a string.</span></li>
+      <li><span class="g">Flick</span><span>Flick fast along a string to send sparks down it.</span></li>
+      <li><span class="g">Clear</span><span>Make a fist and hold it for a second.</span></li>
+    </ul>
+    <ul class="guide hide" id="guideTouch">
+      <li><span class="g">Draw</span><span>Drag to stretch a string. Shorter is higher.</span></li>
+      <li><span class="g">Pluck</span><span>Swipe across strings (mouse: just move over them; touch: switch to Play).</span></li>
+      <li><span class="g">Flick</span><span>Swipe fast along a string to send sparks.</span></li>
+    </ul>
+    <button class="btn" id="bStart">Start with camera</button>
+    <button class="link" id="bTouch">Play with touch or mouse instead</button>
+    <div id="err"></div>
+    <div class="note" id="privacy">Hand tracking runs on your device. No video leaves it.<br>Best on a laptop webcam with your hands well lit.</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ================= Setup =================
+const $ = s => document.querySelector(s);
+const canvas = $('#c'), ctx = canvas.getContext('2d');
+const video = $('#cam');
+let W = 0, H = 0, DPR = 1, DIAG = 1;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight; DIAG = Math.hypot(W, H);
+  canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+}
+addEventListener('resize', resize); resize();
+
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const FRAMED = (() => { try { return window.self !== window.top; } catch(e){ return true; } })();
+
+// ================= Music =================
+const SCALES = [
+  {name:'Pentatonic', steps:[0,2,4,7,9]},
+  {name:'Minor pent.', steps:[0,3,5,7,10]},
+  {name:'Hirajoshi', steps:[0,2,3,7,8]},
+  {name:'Dorian', steps:[0,2,3,5,7,9,10]},
+  {name:'Lydian', steps:[0,2,4,6,7,9,11]},
+];
+const KEYS = [['E',4],['F',5],['G',7],['A',9],['B',11],['C',0],['D',2]];
+let scaleIdx = 0, keyIdx = 0;
+const NOTE_NAMES = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+let NOTES = [];
+function rebuildNotes(){
+  const pc = KEYS[keyIdx][1];
+  const root = 40 + ((pc - 4 + 12) % 12);     // E2 .. D#3
+  const st = SCALES[scaleIdx].steps; NOTES = [];
+  for (let o = 0; o < 3; o++) for (const s of st) NOTES.push(root + o * 12 + s);
+  NOTES.push(root + 36);
+}
+rebuildNotes();
+const midiFreq = m => 440 * Math.pow(2, (m - 69) / 12);
+const midiName = m => NOTE_NAMES[m % 12] + (Math.floor(m / 12) - 1);
+const noteIdxFor = lenN => Math.round((1 - lenN) * (NOTES.length - 1));
+const hueFor = m => (195 + (m % 12) * 29) % 360;
+const MIN_LEN = () => 0.06 * DIAG, SPAN_LEN = () => 0.62 * DIAG;
+const lenNFor = len => clamp((len - MIN_LEN()) / SPAN_LEN(), 0, 1);
+
+// ================= Audio (Karplus-Strong plucked strings) =================
+const Audio = {
+  ctx: null,
+  init(){
+    if (this.ctx){ this.ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = this.ctx = new AC({latencyHint:'interactive'});
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -16; comp.knee.value = 12; comp.ratio.value = 4;
+    comp.attack.value = 0.003; comp.release.value = 0.25;
+    this.master = ctx.createGain(); this.master.gain.value = 0.9;
+    this.master.connect(comp); comp.connect(ctx.destination);
+    const verb = ctx.createConvolver(); verb.buffer = this.impulse(3.6, 2.4);
+    const wet = ctx.createGain(); wet.gain.value = 0.34;
+    this.send = ctx.createGain(); this.send.connect(verb); verb.connect(wet); wet.connect(this.master);
+    ctx.resume();
+  },
+  impulse(dur, decay){
+    const sr = this.ctx.sampleRate, n = Math.floor(sr * dur), b = this.ctx.createBuffer(2, n, sr);
+    for (let c = 0; c < 2; c++){ const d = b.getChannelData(c);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, decay); }
+    return b;
+  },
+  ks(freq, bright, pos, t60, dur){
+    const sr = this.ctx.sampleRate, n = Math.floor(sr * dur);
+    const buf = this.ctx.createBuffer(1, n, sr), out = buf.getChannelData(0);
+    const P = sr / freq;
+    let L = Math.floor(P - 0.65); if (L < 2) L = 2;
+    const d = P - 0.5 - L, C = (1 - d) / (1 + d);         // allpass for fine tuning
+    const line = new Float32Array(L), tmp = new Float32Array(L);
+    const a = 0.12 + 0.88 * bright; let lp = 0, mean = 0;
+    for (let i = 0; i < L; i++){ lp += a * ((Math.random() * 2 - 1) - lp); tmp[i] = lp; mean += lp; }
+    mean /= L;
+    const M = Math.max(1, Math.round(pos * L)); let peak = 1e-6;
+    for (let i = 0; i < L; i++){ line[i] = (tmp[i] - mean) - 0.9 * (tmp[(i - M + L) % L] - mean); peak = Math.max(peak, Math.abs(line[i])); }
+    for (let i = 0; i < L; i++) line[i] /= peak;
+    const g = Math.pow(10, -3 / (t60 * freq));
+    let ptr = 0, lastX = 0, apx = 0, apy = 0;
+    for (let i = 0; i < n; i++){
+      const x = line[ptr]; out[i] = x;
+      const avg = 0.5 * (x + lastX); lastX = x;
+      const ap = C * avg + apx - C * apy; apx = avg; apy = ap;
+      line[ptr] = ap * g;
+      if (++ptr === L) ptr = 0;
+    }
+    const f0 = n - Math.floor(sr * 0.06);
+    for (let i = f0; i < n; i++) out[i] *= (n - i) / (n - f0);
+    return buf;
+  },
+  pluck(freq, amp, pan = 0, bright = 0.6, pos = 0.3, delay = 0, dur = 0){
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    const t60 = clamp(5.4 - Math.log2(freq / 80) * 1.05, 1.0, 5.5);
+    dur = dur || Math.min(t60 * 0.85 + 0.25, 5);
+    pos = clamp(Math.min(pos, 1 - pos), 0.07, 0.5);
+    const src = ctx.createBufferSource(); src.buffer = this.ks(freq, bright, pos, t60, dur);
+    const gn = ctx.createGain(); gn.gain.value = amp * 0.5;
+    src.connect(gn);
+    let outNode = gn;
+    if (ctx.createStereoPanner){ const p = ctx.createStereoPanner(); p.pan.value = clamp(pan, -1, 1); gn.connect(p); outNode = p; }
+    outNode.connect(this.master); outNode.connect(this.send);
+    src.start(ctx.currentTime + 0.004 + delay);
+  }
+};
+
+// ================= World state =================
+const MAX_STRINGS = 12, IDLE_FADE = 60, IDLE_LIMIT = 150;
+const strings = [], particles = [], sparks = [];
+const stats = {made:0, plucks:0, flicks:0, clears:0};
+let drawing = null;           // {src, a, b, tension, lastIdx, hist}
+let mode = 'intro';           // intro | camera | pointer
+let camOn = true, landmarker = null;
+let touchTool = 'draw';
+const COARSE = matchMedia('(pointer: coarse)').matches;
+
+const sA = s => ({x: s.ax * W, y: s.ay * H});
+const sB = s => ({x: s.bx * W, y: s.by * H});
+const sMidi = s => NOTES[noteIdxFor(s.lenN)];
+
+function createString(a, b, now, silent){
+  const len = dist(a, b);
+  if (len < MIN_LEN()){ burst((a.x + b.x) / 2, (a.y + b.y) / 2, 210, 8, 0.6); return null; }
+  const live = strings.filter(s => !s.dying);
+  if (live.length >= MAX_STRINGS){
+    live.sort((p, q) => p.lastPlayed - q.lastPlayed)[0].dying = now;
+  }
+  const s = {ax:a.x / W, ay:a.y / H, bx:b.x / W, by:b.y / H, lenN:lenNFor(len),
+    energy:0, pluckU:0.5, glow:1, born:now, lastPlayed:now, lastFlick:0,
+    sides:new Map(), lastHit:new Map(), dying:0, phase:Math.random() * 10};
+  strings.push(s);
+  if (!silent){
+    stats.made++;
+    pluckString(s, 0.5, 0.7, now, true);
+    const h = hueFor(sMidi(s)); burst(a.x, a.y, h, 10, 1); burst(b.x, b.y, h, 10, 1);
+  }
+  return s;
+}
+
+function pluckString(s, u, amp, now, internal){
+  s.energy = Math.max(s.energy * 0.5, amp); s.pluckU = u; s.glow = 1; s.lastPlayed = now;
+  s.phase = Math.random() * 6;
+  const a = sA(s), b = sB(s), m = sMidi(s);
+  const px = a.x + (b.x - a.x) * u, py = a.y + (b.y - a.y) * u;
+  const pan = (((a.x + b.x) / 2) / W * 2 - 1) * 0.75;
+  Audio.pluck(midiFreq(m), amp, pan, 0.3 + 0.6 * amp, u);
+  burst(px, py, hueFor(m), 5 + amp * 12, 0.6 + amp);
+  if (!internal) stats.plucks++;
+}
+
+function flickString(s, u, dir, speed, now){
+  const m = sMidi(s), h = hueFor(m);
+  for (let i = 0; i < 4; i++)
+    sparks.push({s, u, dir, v:0.8 + Math.random() * 0.7 + Math.min(1, speed / DIAG * 0.2), hue:h});
+  s.energy = Math.max(s.energy, 0.35); s.glow = 1; s.lastPlayed = now; s.pluckU = u;
+  const idx = noteIdxFor(s.lenN), per = SCALES[scaleIdx].steps.length;
+  const a = sA(s), b = sB(s), pan = (((a.x + b.x) / 2) / W * 2 - 1) * 0.75;
+  for (let k = 0; k <= 5; k++){
+    let j = idx + dir * k;
+    while (j >= NOTES.length) j -= per;
+    while (j < 0) j += per;
+    Audio.pluck(midiFreq(NOTES[j]), 0.34 * (1 - k * 0.11), pan + (Math.random() - 0.5) * 0.3, 0.92, 0.15, k * 0.055, 1.6);
+  }
+  stats.flicks++;
+}
+
+function strumAll(amp, now){
+  const live = strings.filter(s => !s.dying).sort((p, q) => sMidi(q) - sMidi(p));
+  live.forEach((s, i) => {
+    const a = sA(s), b = sB(s), pan = (((a.x + b.x) / 2) / W * 2 - 1) * 0.75;
+    Audio.pluck(midiFreq(sMidi(s)), amp, pan, 0.5, 0.3, i * 0.04);
+    setTimeout(() => { s.energy = Math.max(s.energy, amp + 0.2); s.glow = 1; s.pluckU = 0.3; }, i * 40);
+    s.lastPlayed = now;
+  });
+}
+
+function clearAll(now){
+  const live = strings.filter(s => !s.dying);
+  if (!live.length) return;
+  strumAll(0.28, now);
+  for (const s of live){
+    s.dying = now + 250;
+    const a = sA(s), b = sB(s), h = hueFor(sMidi(s));
+    for (let i = 0; i < 18; i++){
+      const u = Math.random();
+      spawn(a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u, (Math.random() - 0.5) * 120, (Math.random() - 0.5) * 120 - 40, h, 1.4 + Math.random());
+    }
+  }
+  stats.clears++;
+}
+
+// ================= Particles =================
+function spawn(x, y, vx, vy, hue, life, size){
+  if (particles.length > 700) particles.shift();
+  particles.push({x, y, vx, vy, hue, life:1, decay:1 / (life || 1), size:size || (1 + Math.random() * 1.8)});
+}
+function burst(x, y, hue, n, power){
+  for (let i = 0; i < n; i++){
+    const ang = Math.random() * Math.PI * 2, sp = (40 + Math.random() * 160) * (power || 1);
+    spawn(x, y, Math.cos(ang) * sp, Math.sin(ang) * sp, hue, 0.5 + Math.random() * 0.7);
+  }
+}
+
+// ================= Finger → string interaction =================
+function fingerStep(fid, p0, p1, vx, vy, now, silent){
+  const speed = Math.hypot(vx, vy), jump = dist(p0, p1);
+  for (const s of strings){
+    if (s.dying) continue;
+    const a = sA(s), b = sB(s), dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy, L = Math.sqrt(L2);
+    if (L < 1) continue;
+    const d = ((p1.x - a.x) * dy - (p1.y - a.y) * dx) / L;
+    if (Math.abs(d) > 4){
+      const ns = d > 0 ? 1 : -1, prev = s.sides.get(fid);
+      if (prev !== undefined && prev !== ns && !silent && jump < 0.35 * DIAG){
+        const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
+        const u = ((mx - a.x) * dx + (my - a.y) * dy) / L2;
+        if (u > 0.015 && u < 0.985 && now - (s.lastHit.get(fid) || 0) > 80){
+          s.lastHit.set(fid, now);
+          pluckString(s, u, clamp(0.28 + speed / (DIAG * 2.2), 0.28, 1), now);
+        }
+      }
+      s.sides.set(fid, ns);
+    }
+    if (!silent && speed > 1.5 * DIAG){
+      const u = ((p1.x - a.x) * dx + (p1.y - a.y) * dy) / L2;
+      if (u > 0.03 && u < 0.97 && Math.abs(d) < 0.05 * DIAG){
+        const along = (vx * dx + vy * dy) / (L * speed);
+        if (Math.abs(along) > 0.72 && now - s.lastFlick > 380){
+          s.lastFlick = now; flickString(s, u, along > 0 ? 1 : -1, speed, now);
+        }
+      }
+    }
+  }
+  if (!silent && speed > 0.9 * DIAG && Math.random() < 0.7)
+    spawn(p1.x, p1.y, -vx * 0.03, -vy * 0.03, 205, 0.5, 1.2);
+}
+function forgetFinger(fid){ for (const s of strings){ s.sides.delete(fid); } }
+
+// ================= Hands =================
+const hands = {};
+const TIP_IDS = [4, 8, 12, 16, 20], PLUCKERS = [8, 12];
+let lastDetect = 0, fistT = 0;
+
+function newHand(label){ return {label, present:false, lastSeen:0, prevT:0, pts:null, size:1,
+  pinchRaw:false, pinched:false, flip:0, fist:false, fingers:{}, pinchPt:{x:0, y:0}}; }
+
+function camRect(){
+  const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+  const sc = Math.max(W / vw, H / vh), dw = vw * sc, dh = vh * sc;
+  return {ox:(W - dw) / 2, oy:(H - dh) / 2, dw, dh};
+}
+
+function onHands(res, now){
+  const r = camRect(), seen = new Set();
+  const lms = res.landmarks || [];
+  lms.forEach((lm, i) => {
+    let label = (res.handedness && res.handedness[i] && res.handedness[i][0] && res.handedness[i][0].categoryName) || ('H' + i);
+    if (seen.has(label)) label = label === 'Left' ? 'Right' : 'Left';
+    if (seen.has(label)) label = 'H' + i;
+    seen.add(label);
+    const h = hands[label] || (hands[label] = newHand(label));
+    const raw = lm.map(p => ({x:r.ox + (1 - p.x) * r.dw, y:r.oy + p.y * r.dh}));
+    if (!h.present || !h.pts) h.pts = raw;
+    else for (let j = 0; j < raw.length; j++){
+      h.pts[j].x += (raw[j].x - h.pts[j].x) * 0.65; h.pts[j].y += (raw[j].y - h.pts[j].y) * 0.65;
+    }
+    const wasPresent = h.present;
+    h.present = true; h.lastSeen = now;
+    const P = h.pts;
+    h.size = dist(P[0], P[9]) || 1;
+    const pr = dist(P[4], P[8]) / h.size;
+    h.pinchRaw = h.pinchRaw ? pr < 0.5 : pr < 0.32;
+    if (h.pinchRaw !== h.pinched){ if (++h.flip >= 2){ h.pinched = h.pinchRaw; h.flip = 0; } } else h.flip = 0;
+    h.pinchPt = {x:(P[4].x + P[8].x) / 2, y:(P[4].y + P[8].y) / 2};
+    h.fist = !h.pinched && [[8,5],[12,9],[16,13],[20,17]].every(([t, m]) => dist(P[t], P[0]) < dist(P[m], P[0]) * 1.12);
+    // fingertips that pluck
+    const dt = Math.max(8, now - (h.prevT || now - 33)) / 1000;
+    for (const id of PLUCKERS){
+      const fid = label + id, p = P[id];
+      let f = h.fingers[id];
+      if (!f || !wasPresent){
+        forgetFinger(fid);
+        f = h.fingers[id] = {x:p.x, y:p.y, vx:0, vy:0};
+        fingerStep(fid, p, p, 0, 0, now, true);
+        continue;
+      }
+      const vx = (p.x - f.x) / dt, vy = (p.y - f.y) / dt;
+      f.vx = f.vx * 0.35 + vx * 0.65; f.vy = f.vy * 0.35 + vy * 0.65;
+      fingerStep(fid, {x:f.x, y:f.y}, {x:p.x, y:p.y}, f.vx, f.vy, now, h.fist);
+      f.x = p.x; f.y = p.y;
+    }
+    h.prevT = now;
+  });
+  for (const k in hands){
+    const h = hands[k];
+    if (!seen.has(k) && h.present && now - h.lastSeen > 220){ h.present = false; h.pinched = false; h.pinchRaw = false; h.fist = false; }
+  }
+
+  // Pull a thread taut with two pinches
+  const pres = presentHands().sort((p, q) => p.pts[0].x - q.pts[0].x);
+  if (pres.length >= 2 && pres[0].pinched && pres[1].pinched){
+    const a = {...pres[0].pinchPt}, b = {...pres[1].pinchPt};
+    if (!drawing || drawing.src !== 'hands') drawing = {src:'hands', a, b, tension:0, lastIdx:-1, hist:[]};
+    else { drawing.a = a; drawing.b = b; }
+    drawing.hist.push({a, b}); if (drawing.hist.length > 4) drawing.hist.shift();
+  } else if (drawing && drawing.src === 'hands'){
+    const h0 = drawing.hist[0] || drawing;
+    createString(h0.a, h0.b, now); drawing = null;
+  }
+
+  // Hold a fist to clear
+  const fdt = lastDetect ? Math.min(0.1, (now - lastDetect) / 1000) : 0;
+  const fister = pres.find(h => h.fist);
+  if (fister && !drawing && strings.some(s => !s.dying)){
+    if (fistT >= 0){ fistT += fdt; if (fistT > 1.0){ clearAll(now); fistT = -1; } }
+  } else if (!fister) fistT = 0;
+  lastDetect = now;
+}
+const presentHands = () => Object.values(hands).filter(h => h.present && h.pts);
+
+// ================= Pointer fallback (touch & mouse) =================
+const ptrs = new Map();
+canvas.addEventListener('pointerdown', e => {
+  if (mode === 'intro') return;
+  Audio.init();
+  canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+  const p = {x:e.clientX, y:e.clientY}, now = performance.now();
+  const drawMode = e.pointerType === 'mouse' || touchTool === 'draw';
+  ptrs.set(e.pointerId, {x:p.x, y:p.y, t:now, vx:0, vy:0, draw:drawMode});
+  forgetFinger('p' + e.pointerId); fingerStep('p' + e.pointerId, p, p, 0, 0, now, true);
+  if (drawMode && !drawing) drawing = {src:'p' + e.pointerId, a:p, b:{...p}, tension:0, lastIdx:-1, hist:[]};
+});
+canvas.addEventListener('pointermove', e => {
+  if (mode === 'intro') return;
+  const now = performance.now(), p = {x:e.clientX, y:e.clientY}, fid = 'p' + e.pointerId;
+  let st = ptrs.get(e.pointerId);
+  if (!st){
+    if (e.pointerType !== 'mouse') return;          // mouse hover plucks
+    st = {x:p.x, y:p.y, t:now, vx:0, vy:0, draw:false, hover:true}; ptrs.set(e.pointerId, st);
+    forgetFinger(fid); fingerStep(fid, p, p, 0, 0, now, true); return;
+  }
+  const dt = Math.max(8, now - st.t) / 1000;
+  st.vx = st.vx * 0.35 + (p.x - st.x) / dt * 0.65; st.vy = st.vy * 0.35 + (p.y - st.y) / dt * 0.65;
+  if (drawing && drawing.src === fid) drawing.b = p;
+  else fingerStep(fid, {x:st.x, y:st.y}, p, st.vx, st.vy, now, false);
+  st.x = p.x; st.y = p.y; st.t = now;
+});
+function ptrEnd(e){
+  const fid = 'p' + e.pointerId, now = performance.now();
+  if (drawing && drawing.src === fid){ createString(drawing.a, drawing.b, now); drawing = null; }
+  if (e.pointerType === 'mouse' && e.type === 'pointerup'){
+    const st = ptrs.get(e.pointerId); if (st){ st.draw = false; st.hover = true; } return;
+  }
+  ptrs.delete(e.pointerId); forgetFinger(fid);
+}
+canvas.addEventListener('pointerup', ptrEnd);
+canvas.addEventListener('pointercancel', ptrEnd);
+canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse'){ ptrs.delete(e.pointerId); forgetFinger('p' + e.pointerId); } });
+
+// ================= Rendering =================
+const PTS = new Float32Array(2 * 49);
+function strokePts(n, width, style){
+  ctx.lineWidth = width; ctx.strokeStyle = style; ctx.beginPath();
+  ctx.moveTo(PTS[0], PTS[1]);
+  for (let i = 1; i <= n; i++) ctx.lineTo(PTS[2 * i], PTS[2 * i + 1]);
+  ctx.stroke();
+}
+function glow(n, h, b, coreBoost){
+  strokePts(n, 16, `hsla(${h},100%,60%,${0.05 * b})`);
+  strokePts(n, 6, `hsla(${h},100%,62%,${0.2 * b})`);
+  strokePts(n, 2.2, `hsla(${h},100%,78%,${0.8 * b})`);
+  strokePts(n, 1, `hsla(${h},70%,96%,${0.6 * b * coreBoost})`);
+}
+function node(x, y, h, a){
+  ctx.fillStyle = `hsla(${h},100%,70%,${0.14 * a})`; ctx.beginPath(); ctx.arc(x, y, 9, 0, 7); ctx.fill();
+  ctx.fillStyle = `hsla(${h},100%,85%,${0.85 * a})`; ctx.beginPath(); ctx.arc(x, y, 3, 0, 7); ctx.fill();
+}
+
+function drawStrings(now, dt){
+  const t = now / 1000, N = 48;
+  for (let i = strings.length - 1; i >= 0; i--){
+    const s = strings[i];
+    let fade = 1, sagDie = 0;
+    if (s.dying && now >= s.dying){
+      const k = (now - s.dying) / 700;
+      if (k >= 1){ strings.splice(i, 1); continue; }
+      fade = 1 - k; sagDie = k * k;
+    }
+    const idle = (now - s.lastPlayed) / 1000;
+    if (!s.dying && idle > IDLE_LIMIT) s.dying = now;
+    else if (!s.dying && idle > IDLE_FADE) fade *= 1 - 0.75 * (idle - IDLE_FADE) / (IDLE_LIMIT - IDLE_FADE);
+    s.energy *= Math.exp(-dt * 1.6); s.glow *= Math.exp(-dt * 0.7);
+    const a = sA(s), b = sB(s), dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
+    const nx = -dy / L, ny = dx / L;
+    const m = sMidi(s), idx = noteIdxFor(s.lenN), h = hueFor(m);
+    const vf = 4 + 6 * idx / (NOTES.length - 1);
+    const amp = s.energy * Math.min(28, L * 0.07);
+    for (let k = 0; k <= N; k++){
+      const u = k / N, su = Math.sin(Math.PI * u);
+      let disp = 0;
+      for (let q = 1; q <= 3; q++)
+        disp += Math.sin(q * Math.PI * s.pluckU) * Math.sin(q * Math.PI * u) * Math.cos(2 * Math.PI * vf * q * t + s.phase * q) / q;
+      disp = disp * amp + 0.7 * su * Math.sin(t * 1.3 + u * 9 + s.phase);
+      PTS[2 * k] = a.x + dx * u + nx * disp;
+      PTS[2 * k + 1] = a.y + dy * u + ny * disp + sagDie * su * L * 0.25;
+    }
+    const br = (0.42 + 0.58 * Math.min(1, s.glow * 0.7 + s.energy)) * fade;
+    glow(N, h, br, 0.3 + s.energy);
+    node(a.x, a.y, h, fade); node(b.x, b.y, h, fade);
+  }
+}
+
+function slackThread(a, b, tension, t, seed){
+  const N = 28, L = dist(a, b), dx = b.x - a.x, dy = b.y - a.y;
+  const nx = -dy / (L || 1), ny = dx / (L || 1);
+  const sag = (1 - tension) * Math.min(L * 0.22, 140);
+  for (let k = 0; k <= N; k++){
+    const u = k / N, w = 4 * u * (1 - u);
+    const wob = (1 - tension * 0.85) * 3 * Math.sin(t * 3 + u * 12 + seed) * w;
+    PTS[2 * k] = a.x + dx * u + nx * wob;
+    PTS[2 * k + 1] = a.y + dy * u + sag * w + ny * wob;
+  }
+  return N;
+}
+
+function drawLiveThreads(now, dt){
+  const t = now / 1000;
+  const pres = presentHands().sort((p, q) => p.pts[0].x - q.pts[0].x);
+  if (pres.length >= 2 && !(drawing && drawing.src === 'hands')){
+    const A = pres[0], B = pres[1];
+    for (const j of TIP_IDS){
+      const n = slackThread(A.pts[j], B.pts[j], 0, t, j);
+      const al = j === 8 ? 0.55 : 0.16;
+      strokePts(n, 5, `hsla(205,90%,70%,${al * 0.22})`);
+      strokePts(n, 1.2, `hsla(205,80%,85%,${al})`);
+    }
+  }
+  if (drawing){
+    drawing.tension += (1 - drawing.tension) * Math.min(1, dt * 9);
+    const a = drawing.a, b = drawing.b, len = dist(a, b);
+    const ok = len >= MIN_LEN();
+    const idx = noteIdxFor(lenNFor(len)), m = NOTES[idx], h = ok ? hueFor(m) : 210;
+    if (ok && idx !== drawing.lastIdx){
+      if (drawing.lastIdx !== -1) Audio.pluck(midiFreq(m), 0.13, ((a.x + b.x) / W - 1) * 0.7, 0.45, 0.5, 0, 0.5);
+      drawing.lastIdx = idx;
+    }
+    const n = slackThread(a, b, drawing.tension, t, 1);
+    glow(n, h, ok ? 0.85 : 0.35, 0.8);
+    node(a.x, a.y, h, 1); node(b.x, b.y, h, 1);
+    if (ok){
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      let nx = -(b.y - a.y) / len, ny = (b.x - a.x) / len; if (ny > 0){ nx = -nx; ny = -ny; }
+      ctx.font = '500 15px ui-sans-serif,system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = `hsla(${h},100%,86%,.95)`;
+      ctx.fillText(midiName(m), mx + nx * 24, my + ny * 24);
+    }
+  }
+}
+
+function drawSparks(dt){
+  for (let i = sparks.length - 1; i >= 0; i--){
+    const sp = sparks[i], s = sp.s;
+    if (s.dying || strings.indexOf(s) < 0){ sparks.splice(i, 1); continue; }
+    sp.u += sp.dir * sp.v * dt;
+    const a = sA(s), b = sB(s);
+    const uu = clamp(sp.u, 0, 1), x = a.x + (b.x - a.x) * uu, y = a.y + (b.y - a.y) * uu;
+    if (sp.u < 0 || sp.u > 1){ burst(x, y, sp.hue, 10, 0.8); s.energy = Math.max(s.energy, 0.2); sparks.splice(i, 1); continue; }
+    spawn(x, y, (Math.random() - 0.5) * 40, (Math.random() - 0.5) * 40, sp.hue, 0.45, 1.4);
+    ctx.fillStyle = `hsla(${sp.hue},100%,70%,.3)`; ctx.beginPath(); ctx.arc(x, y, 9, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.95)'; ctx.beginPath(); ctx.arc(x, y, 2.6, 0, 7); ctx.fill();
+  }
+}
+
+function drawParticles(dt){
+  for (let i = particles.length - 1; i >= 0; i--){
+    const p = particles[i];
+    p.life -= dt * p.decay;
+    if (p.life <= 0){ particles.splice(i, 1); continue; }
+    p.vx *= Math.exp(-dt * 2); p.vy = p.vy * Math.exp(-dt * 2) + 40 * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    ctx.fillStyle = `hsla(${p.hue},100%,${70 + 20 * p.life}%,${p.life * 0.85})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.5 + p.life * 0.5), 0, 7); ctx.fill();
+  }
+}
+
+function drawHands(){
+  for (const h of presentHands()){
+    for (const j of TIP_IDS){
+      const p = h.pts[j];
+      ctx.fillStyle = 'rgba(190,225,255,.55)'; ctx.beginPath(); ctx.arc(p.x, p.y, 2.6, 0, 7); ctx.fill();
+    }
+    if (h.pinched){
+      ctx.strokeStyle = 'hsla(190,100%,78%,.8)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(h.pinchPt.x, h.pinchPt.y, 11, 0, 7); ctx.stroke();
+    }
+    if (h.fist && fistT > 0){
+      const c = h.pts[9], r = h.size * 0.9;
+      ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, 7); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,220,180,.85)';
+      ctx.beginPath(); ctx.arc(c.x, c.y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, fistT)); ctx.stroke();
+    }
+  }
+}
+
+function drawBackground(){
+  const vidOk = mode === 'camera' && camOn && video.readyState >= 2;
+  if (vidOk){
+    const r = camRect();
+    ctx.save(); ctx.translate(W, 0); ctx.scale(-1, 1);
+    ctx.drawImage(video, r.ox, r.oy, r.dw, r.dh); ctx.restore();
+    ctx.fillStyle = 'rgba(4,5,14,.8)'; ctx.fillRect(0, 0, W, H);
+  } else {
+    ctx.fillStyle = '#04050d'; ctx.fillRect(0, 0, W, H);
+  }
+}
+
+// ================= Hints =================
+let hintCur = null;
+function hintText(){
+  if (mode === 'intro') return '';
+  if (mode === 'pointer'){
+    if (drawing) return 'Stretch to tune · release to pin';
+    if (!stats.made) return COARSE ? 'Drag to stretch a string of light' : 'Drag to stretch a string of light';
+    if (stats.plucks < 3) return COARSE ? 'Tap “Touch: Draw” to switch to Play, then swipe across strings' : 'Move the mouse across a string to pluck it';
+    if (!stats.flicks) return 'Swipe fast along a string to send sparks';
+    return '';
+  }
+  if (!landmarker) return '';
+  const pres = presentHands();
+  if (drawing && drawing.src === 'hands') return 'Stretch to tune · release to pin';
+  if (!pres.length) return 'Raise both hands in front of the camera';
+  if (pres.length === 1 && !stats.made) return 'Bring in your other hand';
+  if (!stats.made) return 'Pinch thumb and index on both hands to pull a thread taut';
+  if (stats.plucks < 4) return 'Swipe a fingertip across a string to pluck it';
+  if (!stats.flicks) return 'Flick fast along a string to send sparks';
+  if (stats.made >= 4 && !stats.clears) return 'Make a fist and hold it to clear';
+  return '';
+}
+function updateHint(){
+  const t = hintText();
+  if (t === hintCur) return;
+  hintCur = t; const el = $('#hint');
+  el.style.opacity = 0;
+  setTimeout(() => { if (hintCur === t){ el.textContent = t; el.style.opacity = t ? 1 : 0; } }, 300);
+}
+const setStatus = t => { $('#status').textContent = t; };
+
+// ================= Main loop =================
+let lastFrame = performance.now(), lastVideoTime = -1, demoTimer = 0;
+function loop(){
+  const now = performance.now(), dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
+  if (landmarker && mode === 'camera' && video.readyState >= 2 && video.currentTime !== lastVideoTime){
+    lastVideoTime = video.currentTime;
+    try { onHands(landmarker.detectForVideo(video, now), now); } catch(e){ console.warn(e); }
+  }
+  if (mode === 'intro'){
+    demoTimer -= dt;
+    if (demoTimer <= 0 && strings.length){
+      demoTimer = 0.9 + Math.random() * 1.2;
+      const s = strings[Math.floor(Math.random() * strings.length)];
+      s.energy = 0.5 + Math.random() * 0.4; s.pluckU = 0.2 + Math.random() * 0.6; s.glow = 1; s.lastPlayed = now;
+    }
+  }
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  drawBackground();
+  ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  drawStrings(now, dt);
+  drawLiveThreads(now, dt);
+  drawSparks(dt);
+  drawParticles(dt);
+  ctx.globalCompositeOperation = 'source-over';
+  drawHands();
+  updateHint();
+  requestAnimationFrame(loop);
+}
+
+function makeDemo(){
+  const now = performance.now();
+  const pairs = [[.18,.30,.52,.22],[.30,.62,.80,.40],[.55,.78,.88,.70],[.12,.50,.40,.82]];
+  for (const [ax, ay, bx, by] of pairs) createString({x:ax * W, y:ay * H}, {x:bx * W, y:by * H}, now, true);
+}
+
+// ================= Start / UI =================
+const MP_VER = '0.10.14';
+const MP_CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}`;
+const MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+
+function enterPlay(newMode){
+  mode = newMode;
+  strings.length = 0; sparks.length = 0;
+  $('#overlay').classList.add('gone');
+  $('#hud').classList.add('on');
+  $('#bCam').classList.toggle('hide', newMode !== 'camera');
+  $('#bTool').classList.toggle('hide', !COARSE);
+}
+
+async function startCamera(){
+  Audio.init();
+  $('#err').textContent = '';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    $('#err').textContent = 'This browser can’t open the camera here. Open the page over https (or as a local file in Chrome), or play with touch.';
+    return;
+  }
+  $('#bStart').textContent = 'Starting camera…';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user', width:{ideal:1280}, height:{ideal:720}}, audio:false});
+    video.srcObject = stream; await video.play();
+  } catch(e){
+    $('#bStart').textContent = 'Start with camera';
+    $('#err').textContent = (e && e.name === 'NotAllowedError')
+      ? 'Camera permission was blocked. Allow it in your browser’s site settings and try again, or play with touch.'
+      : 'Couldn’t open a camera (' + (e && e.name || 'error') + '). You can still play with touch or mouse.';
+    return;
+  }
+  enterPlay('camera');
+  setStatus('Loading hand tracking…');
+  try {
+    const vision = await import(MP_CDN + '/vision_bundle.mjs');
+    const fileset = await vision.FilesetResolver.forVisionTasks(MP_CDN + '/wasm');
+    const opts = delegate => ({baseOptions:{modelAssetPath:MODEL, delegate}, runningMode:'VIDEO', numHands:2,
+      minHandDetectionConfidence:0.6, minHandPresenceConfidence:0.5, minTrackingConfidence:0.5});
+    try { landmarker = await vision.HandLandmarker.createFromOptions(fileset, opts('GPU')); }
+    catch(e){ console.warn('GPU delegate failed, using CPU', e); landmarker = await vision.HandLandmarker.createFromOptions(fileset, opts('CPU')); }
+    setStatus('');
+  } catch(e){
+    console.error(e);
+    setStatus('Hand tracking couldn’t load (needs internet the first time). Mouse and touch still work.');
+  }
+}
+
+function startPointer(){ Audio.init(); enterPlay('pointer'); }
+
+$('#bStart').addEventListener('click', startCamera);
+$('#bTouch').addEventListener('click', startPointer);
+$('#bScale').addEventListener('click', () => {
+  scaleIdx = (scaleIdx + 1) % SCALES.length; rebuildNotes();
+  $('#bScale').innerHTML = 'Scale <b>' + SCALES[scaleIdx].name + '</b>'; strumAll(0.2, performance.now());
+});
+$('#bKey').addEventListener('click', () => {
+  keyIdx = (keyIdx + 1) % KEYS.length; rebuildNotes();
+  $('#bKey').innerHTML = 'Key <b>' + KEYS[keyIdx][0] + '</b>'; strumAll(0.2, performance.now());
+});
+$('#bTool').addEventListener('click', () => {
+  touchTool = touchTool === 'draw' ? 'play' : 'draw';
+  $('#bTool').innerHTML = 'Touch <b>' + (touchTool === 'draw' ? 'Draw' : 'Play') + '</b>';
+});
+$('#bCam').addEventListener('click', () => { camOn = !camOn; $('#bCam').innerHTML = 'Camera <b>' + (camOn ? 'On' : 'Off') + '</b>'; });
+$('#bClear').addEventListener('click', () => clearAll(performance.now()));
+$('#bHelp').addEventListener('click', () => {
+  const ov = $('#overlay');
+  if (ov.classList.contains('gone')){
+    ov.classList.remove('gone');
+    $('#bStart').classList.remove('hide'); $('#bStart').textContent = 'Resume'; $('#bTouch').classList.add('hide'); $('#err').textContent = '';
+    $('#guideHands').classList.toggle('hide', mode === 'pointer'); $('#guideTouch').classList.toggle('hide', mode !== 'pointer');
+  }
+});
+// After the first start, the main button becomes "Resume"
+const origStart = startCamera;
+$('#bStart').removeEventListener('click', startCamera);
+$('#bStart').addEventListener('click', () => {
+  if (mode === 'intro') origStart();
+  else $('#overlay').classList.add('gone');
+});
+
+// Inside a sandboxed frame the camera is blocked: offer touch only.
+if (FRAMED){
+  $('#bStart').classList.add('hide');
+  $('#guideHands').classList.add('hide'); $('#guideTouch').classList.remove('hide');
+  $('#bTouch').className = 'btn'; $('#bTouch').textContent = 'Start playing';
+  $('#privacy').innerHTML = 'This preview is touch and mouse only.<br>Hand tracking needs the standalone file, which can use your camera.';
+}
+
+makeDemo();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
